@@ -1,2 +1,5 @@
 # Byte-compiled
 __pycache__/
+
+# Cache files created by program but not properly deleted
+cache-*.jpg
