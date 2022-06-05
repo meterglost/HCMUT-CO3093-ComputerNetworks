@@ -87,26 +87,29 @@ class Client:
 
 	def setupMovie(self):
 		"""Setup button handler."""
-		print("Setting up...\n")
+		print('Setting up...\n')
 		self.sendRtspRequest(self.SETUP)
 
 	def exitClient(self):
 		"""Teardown button handler."""
-		print("Closing session...\n")
 		if self.requestSent == self.SETUP:
+			print('Session not yet setup, exiting')
+			print('Clearing cache...\n')
+			os.remove(f'{CACHE_FILE_NAME}{self.sessionId}{CACHE_FILE_EXT}')
 			self.state = self.INIT
 			self.updateWidgetsState()
 		else:
+			print('Closing session...\n')
 			self.sendRtspRequest(self.TEARDOWN)
 
 	def pauseMovie(self):
 		"""Pause button handler."""
-		print("Pausing...\n")
+		print('Pausing...\n')
 		self.sendRtspRequest(self.PAUSE)
 
 	def playMovie(self):
 		"""Play button handler."""
-		print("Playing...\n")
+		print('Playing...\n')
 		self.sendRtspRequest(self.PLAY)
 
 	def writeFrame(self, data):
@@ -127,22 +130,27 @@ class Client:
 		"""Connect to the Server. Start a new RTSP/TCP session."""
 
 		try:
-			self.rtspSocket = {}
-			self.rtspSocket['socket'] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			self.rtspSocket = {
+				'socket' : socket.socket(socket.AF_INET, socket.SOCK_STREAM),
+				'worker' : threading.Thread(target=self.recvRtspReply),
+				'runEvent' : threading.Event(),
+				'stopEvent' : threading.Event(),
+			}
 			self.rtspSocket['socket'].connect((self.serverAddr, self.serverPort))
+			self.rtspSocket['runEvent'].clear()
+			self.rtspSocket['stopEvent'].clear()
+			self.rtspSocket['worker'].start()
 
 			self.updateWidgetsState()
 
+			print('Successfully connected to the server\n')
 		except:
 			tkinter.messagebox.showwarning('Client.py', f'Failed to connect to Server at {self.serverAddr}:{self.serverPort}')
 
 	def sendRtspRequest(self, requestCode):
 		"""Send RTSP request to the server."""
 
-		self.rtspSocket['event'] = threading.Event()
-		self.rtspSocket['event'].clear()
-		self.rtspSocket['worker'] = threading.Thread(target=self.recvRtspReply)
-		self.rtspSocket['worker'].start()
+		self.rtspSocket['runEvent'].set()
 
 		if requestCode == self.SETUP:
 			self.rtspSeq = 1
@@ -178,18 +186,21 @@ class Client:
 
 	def recvRtspReply(self):
 		"""Receive RTSP reply from the server."""
-		while not self.rtspSocket['event'].is_set():
-			try:
-				reply = self.rtspSocket['socket'].recv(1024)
-				if reply:
-					self.parseRtspReply(reply.decode("utf-8"))
-			except:
-				pass
 
-			self.rtspSocket['event'].wait(0.02)
+		while not self.rtspSocket['stopEvent'].is_set():
+			if self.rtspSocket['runEvent'].is_set():
+				try:
+					reply = self.rtspSocket['socket'].recv(1024)
+					if reply:
+						self.parseRtspReply(reply.decode("utf-8"))
+				except:
+					pass
+			else:
+				self.rtspSocket['runEvent'].wait(0.01)
 
 	def parseRtspReply(self, data):
 		"""Parse the RTSP reply from the server."""
+
 		lines = data.split('\n')
 		statusCode = int(lines[0].split(' ')[1])
 		sequenceNumber = int(lines[1].split(' ')[1])
@@ -201,7 +212,10 @@ class Client:
 		if sequenceNumber != self.rtspSeq:
 			return
 
-		self.rtspSocket['event'].set()
+		if self.rtspSocket['runEvent'].is_set():
+			self.rtspSocket['runEvent'].clear()
+		else:
+			return
 
 		if statusCode == 500:
 			tkinter.messagebox.showwarning('Client.py', 'Connection error')
@@ -211,23 +225,23 @@ class Client:
 			return
 
 		if self.requestSent == self.SETUP:
+			self.state = self.READY
 			self.sessionId = sessionNumber
 			open(f'{CACHE_FILE_NAME}{self.sessionId}{CACHE_FILE_EXT}', 'x').close()
 			self.openRtpPort()
-			self.state = self.READY
 		elif self.requestSent == self.PLAY:
-			self.rtpSocket['event'] = threading.Event()
-			self.rtpSocket['event'].clear()
-			self.rtpSocket['worker'] = threading.Thread(target=self.listenRtp)
-			self.rtpSocket['worker'].start()
 			self.state = self.PLAYING
+			self.rtpSocket['runEvent'].set()
 		elif self.requestSent == self.PAUSE:
-			self.rtpSocket['event'].set()
 			self.state = self.READY
+			self.rtpSocket['runEvent'].clear()
 		elif self.requestSent == self.TEARDOWN:
+			self.state = self.INIT
 			self.teardownAcked = 1
-			self.rtpSocket['event'].set()
-			self.rtpSocket['event'].wait()
+			self.rtpSocket['runEvent'].clear()
+			self.rtpSocket['stopEvent'].set()
+			self.rtpSocket['worker'].join()
+
 			try:
 				self.rtpSocket['socket'].shutdown(socket.SHUT_RDWR)
 			except:
@@ -237,8 +251,6 @@ class Client:
 			print('Clearing cache...')
 			os.remove(f'{CACHE_FILE_NAME}{self.sessionId}{CACHE_FILE_EXT}')
 
-			self.state = self.INIT
-
 		self.updateWidgetsState()
 
 	def openRtpPort(self):
@@ -247,30 +259,38 @@ class Client:
 		# TO COMPLETE
 		#-------------
 		# Create a new datagram socket to receive RTP packets from the server
-		self.rtpSocket = {}
-		self.rtpSocket['socket'] = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.rtpSocket = {
+			'socket' : socket.socket(socket.AF_INET, socket.SOCK_DGRAM),
+			'runEvent' : threading.Event(),
+			'stopEvent' : threading.Event(),
+			'worker' : threading.Thread(target=self.listenRtp)
+		}
 		self.rtpSocket['socket'].bind(('', self.rtpPort))
 
 		# Set the timeout value of the socket to 0.5sec
 		self.rtpSocket['socket'].settimeout(0.5)
 
+		self.rtpSocket['runEvent'].clear()
+		self.rtpSocket['stopEvent'].clear()
+		self.rtpSocket['worker'].start()
+
 	def listenRtp(self):
 		"""Listen for RTP packets."""
+		while not self.rtpSocket['stopEvent'].is_set():
+			if self.rtpSocket['runEvent'].is_set():
+				try:
+					data, addr = self.rtpSocket['socket'].recvfrom(65536)
+					rtpPacket = RtpPacket()
+					rtpPacket.decode(data)
+					if rtpPacket.version() != 2 or rtpPacket.payloadType() != 26 or rtpPacket.seqNum() <= self.frameNbr:
+						continue
 
-		while not self.rtpSocket['event'].is_set():
-			try:
-				data, addr = self.rtpSocket['socket'].recvfrom(65536)
-				rtpPacket = RtpPacket()
-				rtpPacket.decode(data)
-				if rtpPacket.version() != 2 or rtpPacket.payloadType() != 26 or rtpPacket.seqNum() <= self.frameNbr:
-					continue
-
-				self.frameNbr = rtpPacket.seqNum()
-				self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
-			except:
-				pass
-
-			self.rtpSocket['event'].wait(0.02)
+					self.frameNbr = rtpPacket.seqNum()
+					self.updateMovie(self.writeFrame(rtpPacket.getPayload()))
+				except:
+					pass
+			else:
+				self.rtpSocket['runEvent'].wait(0.01)
 
 	def handler(self):
 		"""Handler on explicitly closing the GUI window."""
@@ -285,6 +305,10 @@ class Client:
 
 		if self.state != self.INIT:
 			self.exitClient()
+
+		self.rtspSocket['runEvent'].clear()
+		self.rtspSocket['stopEvent'].set()
+		self.rtspSocket['worker'].join()
 
 		try:
 			self.rtspSocket['socket'].shutdown(socket.SHUT_RDWR)
