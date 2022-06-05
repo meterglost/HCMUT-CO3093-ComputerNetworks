@@ -119,7 +119,9 @@ class Client:
 
 	def updateMovie(self, imageFile):
 		"""Update the image file as video frame in the GUI."""
-		self.label.config(image = ImageTk.PhotoImage(Image.open(imageFile)))
+		image = ImageTk.PhotoImage(Image.open(imageFile))
+		self.label.config(image = image, height=400)
+		self.label.image = image
 
 	def connectToServer(self):
 		"""Connect to the Server. Start a new RTSP/TCP session."""
