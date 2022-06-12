@@ -79,11 +79,6 @@ class Client:
 			self.start.config(state=DISABLED)
 			self.pause.config(state=NORMAL)
 			self.teardown.config(state=NORMAL)
-		elif self.state == self.STOPPED:
-			self.setup.config(state=NORMAL)
-			self.start.config(state=DISABLED)
-			self.pause.config(state=DISABLED)
-			self.teardown.config(state=DISABLED)
 
 	def setupMovie(self):
 		"""Setup button handler."""
