@@ -301,9 +301,10 @@ class Client:
 		if self.state != self.INIT:
 			self.exitClient()
 
-		self.rtspSocket['runEvent'].clear()
-		self.rtspSocket['stopEvent'].set()
-		self.rtspSocket['worker'].join()
+		if self.rtspSocket['worker'].is_alive():
+			self.rtspSocket['runEvent'].clear()
+			self.rtspSocket['stopEvent'].set()
+			self.rtspSocket['worker'].join()
 
 		try:
 			self.rtspSocket['socket'].shutdown(socket.SHUT_RDWR)
