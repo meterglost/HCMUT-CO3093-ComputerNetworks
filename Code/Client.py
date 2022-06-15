@@ -32,9 +32,8 @@ class Client:
 		self.sessionId = 0
 		self.requestSent = -1
 		self.teardownAcked = 0
-		self.frameNbr = 0
 		self.connectToServer()
-		self.openRtpPort()
+		self.frameNbr = 0
 
 	# THIS GUI IS JUST FOR REFERENCE ONLY, STUDENTS HAVE TO CREATE THEIR OWN GUI
 	def createWidgets(self):
@@ -132,7 +131,6 @@ class Client:
 				'runEvent' : threading.Event(),
 				'stopEvent' : threading.Event(),
 			}
-			self.rtspSocket['socket'].settimeout(0.5)
 			self.rtspSocket['socket'].connect((self.serverAddr, self.serverPort))
 			self.rtspSocket['runEvent'].clear()
 			self.rtspSocket['stopEvent'].clear()
@@ -236,6 +234,14 @@ class Client:
 			self.state = self.INIT
 			self.teardownAcked = 1
 			self.rtpSocket['runEvent'].clear()
+			self.rtpSocket['stopEvent'].set()
+			self.rtpSocket['worker'].join()
+
+			try:
+				self.rtpSocket['socket'].shutdown(socket.SHUT_RDWR)
+			except:
+				pass
+			self.rtpSocket['socket'].close()
 
 			print('Clearing cache...')
 			os.remove(f'{CACHE_FILE_NAME}{self.sessionId}{CACHE_FILE_EXT}')
@@ -295,15 +301,10 @@ class Client:
 		if self.state != self.INIT:
 			self.exitClient()
 
-		self.rtspSocket['runEvent'].clear()
-		self.rtspSocket['stopEvent'].set()
 		if self.rtspSocket['worker'].is_alive():
+			self.rtspSocket['runEvent'].clear()
+			self.rtspSocket['stopEvent'].set()
 			self.rtspSocket['worker'].join()
-
-		self.rtpSocket['runEvent'].clear()
-		self.rtpSocket['stopEvent'].set()
-		if self.rtpSocket['worker'].is_alive():
-			self.rtpSocket['worker'].join()
 
 		try:
 			self.rtspSocket['socket'].shutdown(socket.SHUT_RDWR)
